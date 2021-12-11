@@ -46,92 +46,211 @@ class_diag <- function(score, truth, positive, cutoff=.5){
 
 # Mining, Classification, Prediction
 
-## Name and EID here
+## Michelle Park, EID: mnp892
 
 ### Introduction 
+#### 0.1 Introduction to project idea and scope
+This is an alternative version of a study I did for one of my past classes, Biostatistics. As a member of the Gender Health Equity Lab on campus that studies health disparities in the community, I was interested in using this project to observe how different socioeconomic/behavioral factors play a role in the spread of the sexually-transmitted disease HIV not only in the US, but across the world. 
 
-Paragraph or two introducing your datasets and variables, why they are interesting to you, etc. See instructions for more information
+The socioeconomic factors that I chose to focus on were duration of compulsory education in years, and whether the country being observed has legislation specifically addressing domestic violence. These main factors, along with other variables, were used to predict/observe instances of adults (in this case, individuals ages 15+) living with HIV per country.
+
+##### 0.2 Variables
+The main dataset used in this project is 'proj2_data'. This dataset was one that I compiled myself from data provided by the World Bank DataBank. The year that the data was published for all variables was 2020, and this dataset encompasses all member countries of the Bank.
+
+- 'country': reference (ID) variable; all countries recognized as member countries of the World Bank. Extracted from World Development Indicators Database (World Bank, WHO).
+
+- 'education': duration of compulsory education (educational requirements for all students in a certain country) in years. Extracted from World Development Indicators Database (World Bank, WHO).
+
+- 'pop_fem': population identified as female per country. Extracted from Gender Statistics Database (UNESCO).
+
+- 'pop_male': population identified as male per country. Extracted from Gender Statistics Database (UNESCO).
+
+- 'legislation': (binary, yes=1, no=0) whether or not a given country has legislation specifically addressing domestic violence. Extracted from Gender Statistics Database (UNESCO).
+
+- 'HIV': number of adults (ages 15+) in a given country living with HIV. Extracted from Health Nutrition and Population Statistics Database (UN, World Population Prospects).
 
 ```{R}
 library(tidyverse)
-# read your datasets in here, e.g., with read_csv()
+library(readxl)
+proj2_data <- read_excel("~/project2/proj2_data.xlsx", sheet = "clean")
 
-# if your dataset needs tidying, do so here
-
-# any other code here
+# preview of data
+glimpse(proj2_data)
 ```
 
-### Cluster Analysis
+### 1. Cluster Analysis
 
 ```{R}
+# gower setup
 library(cluster)
-# clustering code here
+gow_dat <- proj2_data %>% select(-1)
+gow_dat <- daisy(gow_dat, metric="gower")
+
+
+# clustering 
+sil <- vector()
+
+for (i in 2:10) {
+    pam_fit <- pam(gow_dat, diss=TRUE, k=i)
+    sil[i] <- pam_fit$silinfo$avg.width
+}
+
+# visualization
+ggplot() + geom_line(aes(x = 1:10, y = sil)) + scale_x_continuous(name = "k", 
+    breaks = 1:10)
+
+proj2_clust <- gow_dat %>% pam(k=2, diss=T)
+plot(proj2_clust, which=2)
+
+library(GGally)
+proj2_data %>% mutate(cluster=as.factor(proj2_clust$clustering)) %>% ggpairs(columns=c(2:7), aes(color=cluster))
 ```
 
-Discussion of clustering here
+PAM clustering was performed on all variables based on gower dissimilarities (clustering data incorporates the categorical binary variable 'legislation'). Upon computing possible silhouette widths, the suggested number of clusters was k=2. When using k=2, average silhouette width was 0.65, which indicates that a reasonable structure has been found.
+
+Visualizing all pairwise comparisons of the variables was done through ggpairs. The greatest difference between the two clusters was observed for the variable 'legislation', and while the clusters show a significant amount of overlap for the rest of the variables, it seems like 'pop_male' and 'pop_female' have the most overlap. Overall, besides 'pop_male' and 'pop_fem', there do not seem to be any variables with strong positive or negative correlations with each other. For 'education', cluster 1 (red) is slightly lower indicating an overall shorter duration of compulsory education for those countries when compared to countries in cluster 2 (blue), which is slightly higher. In terms of 'HIV' in particular (which is a key variable and the focus of this project), it seems to display the strongest correlation with 'pop_fem', followed by 'pop_male', although both correlation values are still weak.
     
-    
-### Dimensionality Reduction with PCA
+
+### 2. Dimensionality Reduction with PCA
 
 ```{R}
-# PCA code here
+# clean data
+proj2_num <- proj2_data %>% select(!c("country", "legislation"))
+pca1 <- princomp(proj2_num, cor=T)
+summary(pca1, loadings=T)
+
+# visualize PCs (scree plot)
+eigval <- pca1$sdev^2
+variance_prop <- round(eigval/sum(eigval), 2)
+
+ggplot() + geom_bar(aes(y=variance_prop, x=1:4), stat="identity") + xlab("") +
+  geom_path(aes(y=variance_prop, x=1:4)) + 
+  geom_text(aes(x=1:4, y=variance_prop, label=round(variance_prop, 2)), vjust=1, col="white", size=5) + 
+  scale_y_continuous(breaks=seq(0, 1, .25), labels = scales::percent) + 
+  scale_x_continuous(breaks=1:6) +
+  labs(title="Scree-plot for proj2_data")
+
+# visualize with ggplot
+pca1_viz <- pca1$scores %>% as.data.frame %>% select(1:3) %>% mutate(HIV=proj2_data$HIV, education=proj2_data$education) %>% mutate(PC1=pca1$scores[,1], PC2=pca1$scores[,2])
+
+ggplot(pca1_viz, aes(PC1, PC2)) +
+  geom_point(aes(color = education)) +
+  labs(title="ggplot for PC1 and PC2")
+  
 ```
 
-Discussions of PCA here. 
+PCA was conducted on all numeric variables ('education', 'pop_fem', 'pop_male', and 'HIV'). According to the scree plot, PC1 accounts for 53% of the variance in the dataset, while PC2 accounts for 27% and PC3 accounts for 20%. 
 
-###  Linear Classifier
+Only PCs 1 and 2 were kept, as their cumulative variance was around 80%, and visualized with ggplot. Scoring high on PC1 is a general fitness factor that indicates how strong of a relationship there is between the country being observed and each variable. Scoring high on PC2 indicates that a country has a longer duration of compulsory education and lower instances of HIV per adult population. 
+
+It seems like the majority of the countries observed were not particularly strong for all variables tested in general (low PC1), but countries with a longer duration of education (around 12.5+ years) tended to have the lowest instances of HIV in their adult populations (high PC2). However, there were three countries that showed general strength across all variables as well as longer durations of education and lower levels of adult HIV (high PC1, high PC2). One country stuck out as it showed a mid-level PC1 and very low PC2, indicating that it not only had mid to lower strength in relationship across all variables, but also lower levels of education and higher levels of HIV in its adult population. 
+
+### 3.1 Linear Classifier
 
 ```{R}
-# linear classifier code here
+# logistic regression
+fit_logreg <- glm(legislation~HIV+education, data=proj2_data, family="binomial")
+
+predict_logreg <- predict(fit_logreg, type="response")
+
+class_diag(predict_logreg, proj2_data$legislation, positive=1)
+
+table(truth=proj2_data$legislation, prediction=ifelse(predict_logreg > 0.5, 1, 0)) %>% addmargins
 ```
 
 ```{R}
-# cross-validation of linear classifier here
-```
-
-Discussion here
-
-### Non-Parametric Classifier
-
-```{R}
+# cross-validation of logistic regression
 library(caret)
-# non-parametric classifier code here
+set.seed(1234)
+
+cv_logreg_val <- trainControl(method="cv", number=10, classProbs=T, savePredictions=T)
+
+fit_logreg_val <- train(legislation~HIV+education, data=proj2_data, trControl=cv_logreg_val, method="glm")
+
+class_diag(fit_logreg_val$pred$pred, fit_logreg_val$pred$obs, positive=1)
+```
+
+Logistic regression was chosen to conduct prediction of 'legislation' by 'HIV' and 'education'. According to our classification metrics, accuracy is moderately high (0.8083) paired with high sensitivity (1) and moderately high positive predictive value or PPV (0.8083), but the issue is that specificity is 0, which indicates that none of the actual negative values for 'legislation' are being correctly classified. This is also reflected in the confusion matrix, which only shows predicted and true values for the binary positive value (indicated by 1). AUC is 0.6531, which means that this model is a very poor fit for the data.
+
+Cross validation for the logistic regression model was performed with k-fold CV. Aforementioned metrics (accuracy, sensitivity, PPV) all experienced a slight decrease in value but stayed around the same value, while specificity still remained at 0. AUC decreased from 0.6531 to 0.5612, indicating that there is overfitting.
+
+### 3.2 Non-Parametric Classifier
+
+```{R}
+#non-parametric classifier: kNN
+set.seed(1234)
+fit_np <- knn3(legislation~HIV+education, data=proj2_data)
+
+probs_np <- predict(fit_np, newdata=proj2_data)[,2]
+
+class_diag(probs_np, proj2_data$legislation, positive=1)
+
+# confusion matrix
+table(truth=proj2_data$legislation, predictions=ifelse(probs_np>0.5, 1, 0)) %>% addmargins
 ```
 
 ```{R}
-# cross-validation of np classifier here
+# cross-validation for kNN
+set.seed(1234)
+cv_np <- trainControl(method="cv", number=10, classProbs=T, savePredictions=T)
+
+fit_np <- train(legislation~HIV+education, data=proj2_data, trControl=cv_np, method="knn")
+
+class_diag(fit_np$pred$pred, fit_np$pred$obs, positive=1)
 ```
 
-Discussion
+For the non-parametric classification, k-nearest-neighbors (kNN) was used on the same data: 'legislation' predicted by 'HIV' and 'education'. According to the classification metrics, accuracy is moderately high (0.8333) paired with high sensitivity (0.9588) and moderately high positive predictive value or PPV (0.8532). Unlike our linear classification model, specificity is not 0 but is still on the lower side (0.3043), which indicates that this model is not very skilled at correctly detecting actual negative values for 'legislation'. This is reflected in the confusion matrix, which shows that only 7 true negative values (indicated as 0) were predicted as negative, and 16 values were falsely predicted as positive (indicated as 1). AUC is 0.8628, which means that this model is a good fit for the data and performs better than the logistic regression model tested before.
 
+Cross validation for the kNN regression model was also performed with k-fold CV. Aforementioned metrics (accuracy, sensitivity, PPV, and specificity) all experienced a decrease in value but stayed around the same value. However, a significantly large drop occurred for specificity (0.3048 to 0.0725 after CV). Also, the AUC decreased from 0.8628 to 0.6287; even though the AUC values for both the original kNN model testing and the CV were higher than those for the logistic regression model, the decrease in AUC for kNN indicates that overfitting is still an issue. Overall, these results tell us that the kNN model is not very skilled at making predictions about 'legislation' for new data.
 
-### Regression/Numeric Prediction
+### 4. Regression/Numeric Prediction
 
 ```{R}
-# regression model code here
+library(rpart)
+library(rpart.plot)
+# regression tree
+fit_reg <- train(HIV~., data=proj2_data[2:6], method="rpart")
+rpart.plot(fit_reg$finalModel, digits=3)
+
+# MSE
+yhat_reg <- predict(fit_reg)
+mean((proj2_data$HIV-yhat_reg)^2)
 ```
 
 ```{R}
-# cross-validation of regression model here
+# cross-validation of regression tree using k-folds cv
+set.seed(1234)
+
+cv_reg <- trainControl(method="cv", number=5, classProbs=T, savePredictions=T)
+
+fit_reg <- train(HIV~., data=proj2_data, trControl=cv_reg, method="rpart")
+
+min(fit_reg$results$RMSE)^2
 ```
 
-Discussion
+For regression/numeric prediction, a regression tree was used to predict 'HIV' from all of the other variables in the dataset. Referencing the tree, if a given country has a male population less than 22.4e+6 and more than or equal to 9 years of compulsory education, the number of adult individuals with HIV will be around or lower than 39.3e+3 individuals (60% of the data in the original dataset followed this pattern). The MSE value for this tree is 452496872673 or 4.5e+11. 
 
-### Python 
+K-fold CV was conducted for the tree model, and the MSE value after CV was 388122452706 or 3.9e+11. The MSE value is smaller in CV, which indicates that there is no overfitting in the tree model. 
+
+### 5. Python 
+```{python}
+proj_vars = ["country", "education", "pop_fem", "pop_male", "legislation", "HIV"]
+print(r.proj2_data.head())
+```
 
 ```{R}
 library(reticulate)
+use_python("/usr/bin/python3", required=F)
+cat(c("The ID variable of my dataset 'proj2_data' is", py$proj_vars[1]))
 ```
 
-```{python}
-# python code here
-```
+The variable 'proj_vars' is a list object written in Python containing all the variable names from the 'proj2_data' dataset. It can be accessed in the R code chunk and concatenated with a string, then converted into a character vector to output the phrase "The ID variable of my dataset 'proj2_data' is country".
 
-Discussion
+In the Python code chunk, the 'proj2_data' R dataset can be accessed; using the head() method and the print() function, a preview of the dataset can be printed.
 
 ### Concluding Remarks
 
-Include concluding remarks here, if any
+The dataset used in this project was not ideal for finding clusters and running such deep analyses (it may have helped if more indicators/predictors were used to improve correlation between variables and AUC values), but I do think that it was a good start for future projects. Beyond duration of compulsory education and legislation focused on domestic violence, I hope to continue this study of predicting adult instances of HIV for countries by applying other socioeconomic/behavioral predictors such as housing status, religion, and more. But beyond the results, this was still a fun experience for exploring data science!
 
 
 
